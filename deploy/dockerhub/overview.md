@@ -1,40 +1,32 @@
-# __PROJEKT__
+# <Product> <part>
 
-<One line, at most 100 characters: dockerhub-describe.sh uses it as the short description.>
+[![CI](https://github.com/__OWNER__/__PROJEKT__/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/__OWNER__/__PROJEKT__/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/__OWNER__/__PROJEKT__)](https://github.com/__OWNER__/__PROJEKT__/releases)
+[![License](https://img.shields.io/github/license/__OWNER__/__PROJEKT__)](https://github.com/__OWNER__/__PROJEKT__/blob/main/LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)
 
-<One paragraph: what the image does.>
+![<Product> logo](https://raw.githubusercontent.com/__OWNER__/__PROJEKT__/main/assets/logo-light.svg)
 
-## Security
+__PROJEKT__ <part> – <what it does; this line is the short description, at most 100 characters>.
+<Rest of the paragraph: what the image does; with several images, a pointer to the other one.>
 
-<Short security note, e.g. where it may be reachable from.> Report vulnerabilities as described in
-[SECURITY.md](https://github.com/__OWNER__/__PROJEKT__/blob/main/SECURITY.md).
+> **Status: pre-release.** Versions 0.x are not ready for production use.
 
-## Tags
+<!-- security note of README.md -->
 
-Tags: `1` and the exact version such as `{version}`; no `latest`.
-Images are signed with cosign; see [Verifying images](https://github.com/__OWNER__/__PROJEKT__/blob/main/SECURITY.md#verifying-images).
+![<Detailed alt text of the architecture>](https://raw.githubusercontent.com/__OWNER__/__PROJEKT__/main/assets/architecture.svg)
 
-## Quick start
+Tags: `1` (newest 1.x) and the exact version such as `{version}`. There is no `latest`.
 
-```sh
-docker run --rm docker.io/__DOCKERHUB_NS__/__PROJEKT__:{version}
-```
+<!-- quick start of README.md -->
 
-```yaml
-services:
-  __PROJEKT__:
-    image: docker.io/__DOCKERHUB_NS__/__PROJEKT__:{version}
-    restart: unless-stopped
-```
+<!-- important variables of README.md -->
 
-## Variables
-
-| Variable | Default | Meaning |
-|---|---|---|
-| <NAME> | <value> | <meaning> |
+The same images are on the GitHub Container Registry: `ghcr.io/__OWNER_LC__/__PROJEKT__`.
 
 ## Links
 
-- Repository: https://github.com/__OWNER__/__PROJEKT__
-- Documentation: https://github.com/__OWNER__/__PROJEKT__/tree/main/docs
-- Releases: https://github.com/__OWNER__/__PROJEKT__/releases
+- [Source and known issues](https://github.com/__OWNER__/__PROJEKT__)
+- [Documentation](https://github.com/__OWNER__/__PROJEKT__#readme)
+- [Wiki](https://github.com/__OWNER__/__PROJEKT__/wiki)
+- [Releases](https://github.com/__OWNER__/__PROJEKT__/releases)
