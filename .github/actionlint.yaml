@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: __JAHR__ __OWNER__
+# SPDX-License-Identifier: __SPDX__
+# actionlint 1.7.12 does not know the GitHub-hosted label ubuntu-26.04 yet.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

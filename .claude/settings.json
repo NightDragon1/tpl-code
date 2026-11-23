@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push --force*)", "Bash(git push -f*)", "Bash(git push * --force*)", "Bash(git push * -f*)",
+      "Bash(git push * --delete *)", "Bash(git push --mirror*)",
+      "Bash(git commit * --no-verify*)", "Bash(git push * --no-verify*)",
+      "Bash(gh auth token*)", "Bash(gh auth status --show-token*)",
+      "Bash(gh repo delete *)", "Bash(gh release delete *)", "Bash(gh secret *)", "Bash(gh ruleset *)",
+      "Bash(sudo *)",
+      "Read(./.env)", "Read(./.env.*)", "Read(~/.config/gh/**)", "Read(~/.ssh/**)", "Read(~/.docker/config.json)"
+    ],
+    "ask": [
+      "Bash(gh api -X *)", "Bash(git -c *)", "Bash(bash -c *)", "Bash(sh -c *)"
+    ]
+  },
+  "sandbox": { "enabled": true }
+}

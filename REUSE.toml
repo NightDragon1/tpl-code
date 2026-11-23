@@ -1,0 +1,6 @@
+version = 1
+
+[[annotations]]
+path = ["**/*.json", "acceptance/SHA256SUMS", "**/.gitkeep"]
+SPDX-FileCopyrightText = "__JAHR__ __OWNER__"
+SPDX-License-Identifier = "__SPDX__"

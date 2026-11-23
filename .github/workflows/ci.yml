@@ -1,0 +1,136 @@
+# SPDX-FileCopyrightText: __JAHR__ __OWNER__
+# SPDX-License-Identifier: __SPDX__
+#
+# Required checks in the ruleset main are the jobs lint, test, acceptance and
+# secrets. They are separate jobs, not a matrix: a matrix job skipped by its
+# if reports no check under its matrix names, and the pull request would wait
+# forever. Renaming a job means changing the ruleset in the same step.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner of all jobs; takes precedence over the variable CI_RUNNER
+        type: string
+        required: false
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  # Prefix ci-: called from release.yml, github.workflow is the caller's name.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  changes:
+    # Pull requests from forks never run on the runner of CI_RUNNER.
+    runs-on: ${{ inputs.runner || (github.event.pull_request.head.repo.fork && 'ubuntu-26.04') || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: scope
+        run: echo "code=$(scripts/ci-scope.sh)" >> "$GITHUB_OUTPUT"   # true | false
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ inputs.runner || (github.event.pull_request.head.repo.fork && 'ubuntu-26.04') || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Language setup with cache (setup-go, setup-node, setup-python ...)
+      - run: make lint
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ inputs.runner || (github.event.pull_request.head.repo.fork && 'ubuntu-26.04') || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Language setup with cache (setup-go, setup-node, setup-python ...)
+      - run: make test
+
+  acceptance:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ inputs.runner || (github.event.pull_request.head.repo.fork && 'ubuntu-26.04') || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Language setup with cache (setup-go, setup-node, setup-python ...)
+      - name: Checksums of the acceptance tests
+        run: if [ -s acceptance/SHA256SUMS ]; then sha256sum -c acceptance/SHA256SUMS; fi
+      - run: make acceptance
+
+  # Pull request: the diff. Push to main: the pushed commits. Otherwise
+  # (tags, release): the history of the checked-out commit, not all refs.
+  # Findings name rule, file, line and commit, never the value.
+  secrets:
+    runs-on: ${{ inputs.runner || (github.event.pull_request.head.repo.fork && 'ubuntu-26.04') || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks
+        env:
+          VERSION: 8.30.1
+          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          tgz=$RUNNER_TEMP/gitleaks.tar.gz
+          curl -fsSL --retry 3 -o "$tgz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "$SHA256  $tgz" | sha256sum --strict -c -
+          tar -xzf "$tgz" -C "$RUNNER_TEMP" gitleaks
+      - name: Scan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          report=$RUNNER_TEMP/gitleaks.json
+          opts=(--no-banner --redact --report-format json --report-path "$report")
+          rc=0
+          if [ "$EVENT" = pull_request ]; then
+            git diff --merge-base "$BASE" HEAD | "$RUNNER_TEMP/gitleaks" stdin "${opts[@]}" || rc=$?
+          elif [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ] && [ -n "$BEFORE" ] &&
+            [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            "$RUNNER_TEMP/gitleaks" git "${opts[@]}" --log-opts="$BEFORE..HEAD" . || rc=$?
+          else
+            "$RUNNER_TEMP/gitleaks" git "${opts[@]}" --log-opts=HEAD . || rc=$?
+          fi
+          if [ -s "$report" ]; then
+            jq -r 'def or_diff: if (. // "") == "" then "diff" else . end;
+              .[] | "::error::\(.RuleID) in \(.File | or_diff):\(.StartLine) commit \(.Commit | or_diff)"' "$report"
+          fi
+          exit "$rc"
+
+  full:
+    if: github.event_name == 'push'
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [test-all, audit, image]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make ${{ matrix.target }}

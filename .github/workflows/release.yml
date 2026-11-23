@@ -1,0 +1,245 @@
+# SPDX-FileCopyrightText: __JAHR__ __OWNER__
+# SPDX-License-Identifier: __SPDX__
+#
+# Tag v* (RC and final): full CI, then after the owner's approval in the
+# environment release multi-arch images to ghcr.io and Docker Hub, keyless
+# signatures, SBOM attestations, verification and the GitHub release.
+# Image names come from the repository; the OCI label source is set here.
+# Manual start: dry run, builds both platforms without login, push or signature.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to try, e.g. v1.0
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  HUB_NS: __DOCKERHUB_NS__
+jobs:
+  version:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      ghcr: ${{ steps.v.outputs.ghcr }}
+      hub: ${{ steps.v.outputs.hub }}
+      tags: ${{ steps.v.outputs.tags }}
+      rc: ${{ steps.v.outputs.rc }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: v
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#v}"
+          [[ "$ver" =~ ^[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]] || { echo "::error::tag scheme violated: $TAG"; exit 1; }
+          name="${GITHUB_REPOSITORY#*/}"
+          ghcr="ghcr.io/${GITHUB_REPOSITORY,,}"
+          hub="docker.io/${HUB_NS,,}/${name,,}"
+          rc=false; [[ "$ver" == *-rc* ]] && rc=true
+          pre=$rc;  [[ "$ver" == 0.* ]] && pre=true
+          tags="$ghcr:$ver,$hub:$ver"
+          if [ "$pre" = false ]; then
+            grep -qx "## $ver" CHANGELOG.md || { echo "::error::no section '## $ver' in CHANGELOG.md"; exit 1; }
+            m="${ver%%.*}"; tags="$tags,$ghcr:$m,$hub:$m"
+          fi
+          { echo "version=$ver"; echo "ghcr=$ghcr"; echo "hub=$hub"; echo "tags=$tags"
+            echo "rc=$rc"; echo "prerelease=$pre"; } | tee -a "$GITHUB_OUTPUT"
+
+  dry-run:
+    if: github.event_name == 'workflow_dispatch'
+    needs: version
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0  (not needed if the Dockerfile cross-compiles)
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ${{ needs.version.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            COMMIT=${{ github.sha }}
+
+  ci:
+    if: github.event_name == 'push'
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      runner: ubuntu-26.04
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [version, ci]
+    runs-on: ubuntu-26.04                # fixed, never from a variable
+    timeout-minutes: 45
+    environment: release                 # waits for the owner's approval
+    permissions:
+      contents: read
+      packages: write                    # ghcr.io
+      id-token: write                    # cosign keyless (GitHub OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.version.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            COMMIT=${{ github.sha }}
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - id: syft
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - name: Signatures and SBOM attestations per platform in both registries
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          GHCR: ${{ needs.version.outputs.ghcr }}
+          HUB: ${{ needs.version.outputs.hub }}
+          NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          # Retries only for external network errors (signing service, registry), at most 4 attempts
+          retry() { for i in 1 2 3 4; do "$@" && return 0; [ "$i" = 4 ] && return 1; echo "attempt $i failed"; sleep 5; done; }
+          for repo in "$GHCR" "$HUB"; do
+            retry cosign sign --yes "$repo@$DIGEST"                       # index
+            docker buildx imagetools inspect --raw "$repo@$DIGEST" |
+              jq -r '.manifests[] | select(.platform.os != "unknown") | "\(.digest) \(.platform.architecture)"' |
+              while read -r pd arch; do
+                retry cosign sign --yes "$repo@$pd"                       # platform digest
+                f="$NAME-$arch.spdx.json"
+                [ -f "$f" ] || "$SYFT" "$repo@$pd" -o "spdx-json=$f"
+                retry cosign attest --yes --type spdxjson --predicate "$f" "$repo@$pd"
+              done
+          done
+          ls "$NAME"-*.spdx.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: ${{ github.event.repository.name }}-*.spdx.json
+
+  describe:
+    if: github.event_name == 'push' && needs.version.outputs.rc != 'true'
+    needs: [version, ci]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          VERSION: ${{ needs.version.outputs.version }}
+          HUB: ${{ needs.version.outputs.hub }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: scripts/dockerhub-describe.sh "$VERSION"
+
+  verify:
+    needs: [version, publish]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read                     # ghcr.io is still private at the first release
+    steps:
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - env:
+          TAGS: ${{ needs.version.outputs.tags }}
+          GHCR: ${{ needs.version.outputs.ghcr }}
+          HUB: ${{ needs.version.outputs.hub }}
+        run: |
+          set -euo pipefail
+          id="^https://github\\.com/${GITHUB_REPOSITORY//./\\.}/\\.github/workflows/release\\.yml@refs/tags/"
+          IFS=, read -ra refs <<<"$TAGS"
+          for ref in "${refs[@]}"; do
+            cosign verify "$ref" --certificate-identity-regexp "$id" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+            echo "signed: $ref"
+          done
+          for repo in "$GHCR" "$HUB"; do
+            if docker buildx imagetools inspect "$repo:latest" >/dev/null 2>&1; then
+              echo "::error::$repo:latest exists"; exit 1
+            fi
+          done
+
+  release:
+    needs: [version, verify]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+          path: sbom
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          GHCR: ${{ needs.version.outputs.ghcr }}
+          HUB: ${{ needs.version.outputs.hub }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = true ]; then
+            echo "Pre-release $VERSION for testing. Not for production use." > notes.md
+          else
+            awk -v h="## $VERSION" '$0 == h { f = 1; next } /^## / { if (f) exit } f' CHANGELOG.md > notes.md
+          fi
+          # shellcheck disable=SC2016 # backticks are Markdown
+          printf '\n### Images\n\n- `%s:%s`\n- `%s:%s`\n' "$GHCR" "$VERSION" "$HUB" "$VERSION" >> notes.md
+          flag=--latest; [ "$PRERELEASE" = true ] && flag=--prerelease
+          gh release create "$TAG" sbom/*.spdx.json --verify-tag --title "$VERSION" --notes-file notes.md "$flag"

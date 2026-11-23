@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests"],
+  "automerge": false,
+  "timezone": "Europe/Vienna",
+  "schedule": ["* 0-5 1 * *"],
+  "prConcurrentLimit": 3,
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "rebaseWhen": "behind-base-branch",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null
+  },
+  "dependencyDashboard": true,
+  "labels": ["dependencies"],
+  "packageRules": [
+    { "matchManagers": ["github-actions"], "groupName": "GitHub Actions" },
+    { "matchManagers": ["dockerfile"], "groupName": "base images" }
+  ]
+}
