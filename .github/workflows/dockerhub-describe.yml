@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: __JAHR__ __OWNER__
+# SPDX-License-Identifier: __SPDX__
+#
+# Sets the Docker Hub description without a release, e.g. after a text fix.
+# Manual only, from main, through the environment release; an RC is refused.
+name: Docker Hub description
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published version whose texts are set, e.g. 1.1
+        required: true
+permissions:
+  contents: read
+env:
+  HUB_NS: __DOCKERHUB_NS__
+jobs:
+  describe:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "::error::$VERSION is not a release"; exit 1; }
+      - env:
+          VERSION: ${{ inputs.version }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          name="${GITHUB_REPOSITORY#*/}"
+          HUB="docker.io/${HUB_NS,,}/${name,,}" scripts/dockerhub-describe.sh "$VERSION"

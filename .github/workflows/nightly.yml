@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: __JAHR__ __OWNER__
+# SPDX-License-Identifier: __SPDX__
+name: Nightly
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  long:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [e2e, audit, image-all, sbom]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make ${{ matrix.target }}
+
+  # Cancels every run older than 60 minutes that still runs or waits. Runs of
+  # the workflow "Release" wait in the environment for the owner's approval
+  # and are left alone; the name must match name: in release.yml.
+  watchdog:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: |
+          set -euo pipefail
+          limit=$(date -u -d '60 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          for s in in_progress queued waiting; do
+            gh run list -R "$GITHUB_REPOSITORY" --status "$s" --limit 100 \
+              --json databaseId,createdAt,workflowName \
+              --jq ".[] | select(.createdAt < \"$limit\" and .workflowName != \"Release\") | .databaseId" |
+              xargs -r -n1 gh run cancel -R "$GITHUB_REPOSITORY" || true
+          done
