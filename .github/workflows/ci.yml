@@ -5,6 +5,7 @@
 # secrets. They are separate jobs, not a matrix: a matrix job skipped by its
 # if reports no check under its matrix names, and the pull request would wait
 # forever. Renaming a job means changing the ruleset in the same step.
+# The job size is not a required check.
 name: CI
 on:
   pull_request:
@@ -60,6 +61,7 @@ jobs:
         with:
           persist-credentials: false
       # Language setup with cache (setup-go, setup-node, setup-python ...)
+      - run: scripts/dockerhub-describe-test.sh
       - run: make test
 
   acceptance:
@@ -75,6 +77,42 @@ jobs:
       - name: Checksums of the acceptance tests
         run: if [ -s acceptance/SHA256SUMS ]; then sha256sum -c acceptance/SHA256SUMS; fi
       - run: make acceptance
+
+  # Counts the changed lines of a pull request without lockfiles and files
+  # marked linguist-generated in .gitattributes. Over 400: label over-limit
+  # and a warning; the pull request text names the reason. Never fails.
+  size:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Count
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          LIMIT: 400
+        run: |
+          lock='(^|/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|go\.sum|Cargo\.lock|poetry\.lock|uv\.lock|composer\.lock|Gemfile\.lock)$'
+          lines=0
+          while IFS=$'\t' read -r add del file; do
+            [[ "$add" == - || "$file" =~ $lock ]] && continue            # binary or lockfile
+            case $(git check-attr linguist-generated -- "$file") in *": set" | *": true") continue ;; esac
+            lines=$((lines + add + del))
+          done < <(git diff --numstat --no-renames --merge-base "$BASE" HEAD)
+          echo "changed lines without lockfiles and generated files: $lines"
+          if [ "$lines" -gt "$LIMIT" ]; then
+            echo "::warning::$lines changed lines, over $LIMIT: the pull request text names the reason"
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=over-limit' >/dev/null
+          fi
 
   # Pull request: the diff. Push to main: the pushed commits. Otherwise
   # (tags, release): the history of the checked-out commit, not all refs.
