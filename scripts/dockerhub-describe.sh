@@ -7,7 +7,8 @@
 # DOCKERHUB_TOKEN. The overview is deploy/dockerhub/overview.md: each marker
 # line is replaced by its part of README.md (security note: the paragraph
 # starting with "Run it only"; the sections "## Quick start" and
-# "## Important variables"), relative links in these parts become absolute,
+# "## Important variables"), relative links in these parts become absolute
+# (images on raw.githubusercontent.com, other links on blob/main),
 # {version} is replaced. The short description is the first line of the
 # overview that is not empty, a heading, a badge or image, HTML or a quote.
 # --dry-run prints both texts and does not call Docker Hub. Login and bearer
@@ -25,7 +26,10 @@ $dry || : "${HUB:?HUB is not set}"
 
 section()  { awk -v h="## $1" '/^## / { on = ($0 == h) } on' README.md; }
 security() { awk '/^Run it only/ { on = 1 } on && /^$/ { exit } on' README.md; }
-absolute() { sed "s#](\([^):]*\))#](https://github.com/${GITHUB_REPOSITORY}/blob/main/\1)#g"; }
+absolute() {
+  sed -e "s#!\[\([^]]*\)](\([^):]*\))#![\1](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/\2)#g" \
+    -e "s#](\([^):]*\))#](https://github.com/${GITHUB_REPOSITORY}/blob/main/\1)#g"
+}
 part() {
   local text
   if [ "$1" = security ]; then text=$(security); else text=$(section "$1"); fi

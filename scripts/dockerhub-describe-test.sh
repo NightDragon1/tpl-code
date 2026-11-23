@@ -30,6 +30,8 @@ This paragraph is not part of the security note.
 
 See [compose](deploy/compose/) and [site](https://example.org).
 
+![Diagram](assets/arch.svg) [![Badge](assets/badge.svg)](docs/badge.md)
+
 ```sh
 docker run demo:1.4
 ```
@@ -102,6 +104,8 @@ expect short-description 0 $'Demo panel – does demo things.\n\n# Demo panel'
 expect security-note 0 $'Run it only in a LAN. TLS comes from a\n[reverse proxy](https://github.com/example/demo/blob/main/docs/proxy.md).'
 expect quick-start 0 '## Quick start'
 expect relative-link-absolute 0 '[compose](https://github.com/example/demo/blob/main/deploy/compose/)'
+expect image-raw 0 '![Diagram](https://raw.githubusercontent.com/example/demo/main/assets/arch.svg)'
+expect linked-image 0 '[![Badge](https://raw.githubusercontent.com/example/demo/main/assets/badge.svg)](https://github.com/example/demo/blob/main/docs/badge.md)'
 expect absolute-link-kept 0 '[site](https://example.org)'
 expect variables 0 '| `DEMO_PORT` | `8080` | Port |'
 expect version 0 'Tags: `1` and `1.4`.'
